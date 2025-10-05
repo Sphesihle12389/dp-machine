@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import zipfile, glob, os
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, precision_recall_curve, classification_report
 from sklearn.linear_model import LogisticRegression
@@ -14,7 +13,6 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.utils import k_fold_cross_validation
 
 st.set_page_config(layout="wide", page_title="Two-Pot Retirement — Demo Dashboard")
-
 
 # -------------------------
 # Helper utilities
@@ -227,5 +225,45 @@ st.write("Final mapping to be used:")
 st.json(user_mapping)
 
 # -------------------------
-# Run
+# Run pipeline
+# -------------------------
+if st.sidebar.button("Run pipeline"):
+    df_prepped = prepare_dataset(df, user_mapping)
+
+    st.subheader("EDA & Summary Metrics")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Rows", df_prepped.shape[0])
+    with col2:
+        st.metric("Avg age", f"{df_prepped['age'].mean():.1f}")
+    with col3:
+        st.metric("Avg balance total", f"{df_prepped['balance_total'].mean():.0f}")
+
+    st.write("Value counts for event (withdraw_event):")
+    st.write(df_prepped['event'].value_counts())
+
+    # histograms
+    fig, axes = plt.subplots(1,3, figsize=(14,4))
+    axes[0].hist(df_prepped['age'].dropna(), bins=20)
+    axes[0].set_title("Age distribution")
+    axes[1].hist(df_prepped['salary'].dropna(), bins=20)
+    axes[1].set_title("Salary")
+    axes[2].hist(df_prepped['balance_access'].dropna(), bins=20)
+    axes[2].set_title("Accessible balance")
+    st.pyplot(fig)
+
+    # -------------------------
+    # Correlation heatmap using matplotlib
+    # -------------------------
+    st.subheader("Feature Correlation Heatmap")
+    numeric_cols = ['age', 'salary', 'tenure', 'balance_access', 'balance_retire', 'balance_total', 'time_days']
+    corr = df_prepped[numeric_cols].corr()
+
+    fig_corr, ax_corr = plt.subplots(figsize=(8,6))
+    cax = ax_corr.matshow(corr, cmap='coolwarm')
+    plt.xticks(range(len(numeric_cols)), numeric_cols, rotation=45)
+    plt.yticks(range(len(numeric_cols)), numeric_cols)
+    fig_corr.colorbar(cax)
+    ax_corr.set_title("Correlation Matrix", pad=20)
+    st.pyplot(fig_corr)
 
