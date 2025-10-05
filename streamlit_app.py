@@ -14,6 +14,7 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.utils import k_fold_cross_validation
 
 st.set_page_config(layout="wide", page_title="Two-Pot Retirement — Demo Dashboard")
+pip install seaborn
 
 # -------------------------
 # Helper utilities
