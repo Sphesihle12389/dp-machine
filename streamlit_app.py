@@ -4,8 +4,9 @@ import pandas as pd
 import numpy as np
 import zipfile, glob, os
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, roc_curve, precision_recall_curve, classification_report
+from sklearn.metrics import roc_auc_score, precision_recall_curve, classification_report
 from sklearn.linear_model import LogisticRegression
 import lightgbm as lgb
 import shap
@@ -146,7 +147,6 @@ st.sidebar.title("Inputs & Data")
 uploaded = st.sidebar.file_uploader("Upload CSV or ZIP (CSV inside)", type=["csv","zip","xlsx"])
 use_sample = st.sidebar.checkbox("Use built-in synthetic sample instead", value=True)
 
-# sample dataset generator
 def make_sample(n=2000, seed=42):
     np.random.seed(seed)
     df = pd.DataFrame({
@@ -211,7 +211,6 @@ with col2:
     withdraw_col = st.selectbox("withdraw_event (binary)", options=cols_for_select, index=cols_for_select.index(mapping['withdraw_event']) if mapping['withdraw_event'] in cols_for_select else 0)
 withdraw_date_col = st.selectbox("withdraw_date (optional)", options=cols_for_select, index=cols_for_select.index(mapping['withdraw_date']) if mapping['withdraw_date'] in cols_for_select else 0)
 
-# build mapping dict from user selection
 user_mapping = {
     'member_id': None if member_col == "<none>" else member_col,
     'start_date': None if start_col == "<none>" else start_col,
@@ -227,97 +226,5 @@ st.write("Final mapping to be used:")
 st.json(user_mapping)
 
 # -------------------------
-# Run pipeline
-# -------------------------
-if st.sidebar.button("Run pipeline with current mapping"):
-    with st.spinner("Preparing dataset..."):
-        df_prepped = prepare_dataset(df, user_mapping)
-    st.success("Dataset prepared.")
-
-    # EDA & summary metrics
-    st.subheader("EDA & Summary Metrics")
-    col1, col2, col3 = st.columns(3)
-    with col1: st.metric("Rows", df_prepped.shape[0])
-    with col2: st.metric("Avg age", f"{df_prepped['age'].mean():.1f}")
-    with col3: st.metric("Avg balance total", f"{df_prepped['balance_total'].mean():.0f}")
-    st.write("Value counts for event (withdraw_event):")
-    st.write(df_prepped['event'].value_counts())
-
-    # histograms
-    fig, axes = plt.subplots(1,3, figsize=(14,4))
-    axes[0].hist(df_prepped['age'].dropna(), bins=20); axes[0].set_title("Age distribution")
-    axes[1].hist(df_prepped['salary'].dropna(), bins=20); axes[1].set_title("Salary")
-    axes[2].hist(df_prepped['balance_access'].dropna(), bins=20); axes[2].set_title("Accessible balance")
-    st.pyplot(fig)
-
-    # Classification label: withdraw within 1 year
-    df_prepped['withdraw_1yr'] = ((df_prepped['time_days'] <= 365) & (df_prepped['event']==1)).astype(int)
-    features = ['age','salary','tenure','balance_access','balance_retire']
-    X = df_prepped[features].fillna(0)
-    y = df_prepped['withdraw_1yr']
-    if y.sum()==0:
-        risk_score = 1/(1+np.exp((df_prepped['balance_access']+df_prepped['balance_retire'])/1e5 - 1)) + (10 - df_prepped['tenure'])/20
-        prob = (risk_score - risk_score.min())/(risk_score.max()-risk_score.min()+1e-9)
-        y = (np.random.rand(len(df_prepped)) < (0.25*prob)).astype(int)
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-    # Logistic Regression
-    log_reg = LogisticRegression(max_iter=1000)
-    log_reg.fit(X_train, y_train)
-    y_pred_lr = log_reg.predict_proba(X_test)[:,1]
-    st.write("Logistic Regression AUC (1yr):", f"{roc_auc_score(y_test, y_pred_lr):.3f}")
-
-    # LightGBM
-    dtrain = lgb.Dataset(X_train, label=y_train)
-    params = {'objective':'binary','metric':'auc','learning_rate':0.05,'num_leaves':31}
-    model = lgb.train(params, dtrain, num_boost_round=200)
-    y_pred = model.predict(X_test)
-    st.write("LightGBM AUC (1yr):", f"{roc_auc_score(y_test, y_pred):.3f}")
-
-    st.write("Classification report (threshold 0.5):")
-    st.text(classification_report(y_test, (y_pred>0.5).astype(int)))
-
-    # Precision-Recall curve
-    prec, rec, thr = precision_recall_curve(y_test, y_pred)
-    fig_pr, ax_pr = plt.subplots()
-    ax_pr.plot(rec, prec); ax_pr.set_xlabel("Recall"); ax_pr.set_ylabel("Precision"); ax_pr.set_title("Precision-Recall Curve")
-    st.pyplot(fig_pr)
-
-    # SHAP feature importance
-    st.subheader("SHAP feature importance")
-    try:
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_test)
-        plt.figure(figsize=(6,4))
-        shap.summary_plot(shap_values, X_test, plot_type='bar', show=False)
-        st.pyplot(plt.gcf()); plt.clf()
-        plt.figure(figsize=(8,6))
-        shap.summary_plot(shap_values, X_test, show=False)
-        st.pyplot(plt.gcf()); plt.clf()
-    except Exception as e:
-        st.warning(f"SHAP failed: {e}")
-
-    # Survival analysis
-    st.subheader("Survival analysis")
-    kmf = KaplanMeierFitter()
-    T = df_prepped['time_days']; E = df_prepped['event']
-    kmf.fit(T, event_observed=E)
-    fig_km, ax_km = plt.subplots()
-    kmf.plot_survival_function(ax=ax_km)
-    ax_km.set_xlabel("Days"); ax_km.set_ylabel("Survival probability"); ax_km.set_title("Kaplan-Meier: survival (no-withdrawal)")
-    st.pyplot(fig_km)
-
-    # KM by accessible balance tertiles
-    # Correlation heatmap
-st.subheader("Feature Correlation Heatmap")
-import seaborn as sns
-
-numeric_cols = ['age', 'salary', 'tenure', 'balance_access', 'balance_retire', 'balance_total', 'time_days']
-corr = df_prepped[numeric_cols].corr()
-
-fig_corr, ax_corr = plt.subplots(figsize=(8,6))
-sns.heatmap(corr, annot=True, fmt=".2f", cmap='coolwarm', ax=ax_corr)
-ax_corr.set_title("Correlation Matrix")
-st.pyplot(fig_corr)
+# Run
 
