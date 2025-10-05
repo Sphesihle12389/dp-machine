@@ -309,4 +309,15 @@ if st.sidebar.button("Run pipeline with current mapping"):
     st.pyplot(fig_km)
 
     # KM by accessible balance tertiles
+    # Correlation heatmap
+st.subheader("Feature Correlation Heatmap")
+import seaborn as sns
+
+numeric_cols = ['age', 'salary', 'tenure', 'balance_access', 'balance_retire', 'balance_total', 'time_days']
+corr = df_prepped[numeric_cols].corr()
+
+fig_corr, ax_corr = plt.subplots(figsize=(8,6))
+sns.heatmap(corr, annot=True, fmt=".2f", cmap='coolwarm', ax=ax_corr)
+ax_corr.set_title("Correlation Matrix")
+st.pyplot(fig_corr)
 
